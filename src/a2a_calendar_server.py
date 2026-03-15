@@ -1,7 +1,14 @@
 import re
 from datetime import datetime, timedelta
 
-from a2a_common import run_a2a_server
+import uvicorn
+from a2a.server.agent_execution import AgentExecutor, RequestContext
+from a2a.server.apps import A2AStarletteApplication
+from a2a.server.events import EventQueue
+from a2a.server.request_handlers import DefaultRequestHandler
+from a2a.server.tasks import InMemoryTaskStore
+from a2a.types import AgentCapabilities, AgentCard, AgentSkill
+from a2a.utils.message import new_agent_text_message
 from llm import LLM
 
 
@@ -88,65 +95,73 @@ class Calendar:
             return result_type, self._format_date(value)
 
         return None, "Calendar error"
-calendar = None
 
 
-def get_calendar():
-    global calendar
-    if calendar is None:
-        calendar = Calendar()
-    return calendar
+class CalendarAgentExecutor(AgentExecutor):
+    def __init__(self):
+        self.calendar = Calendar()
+
+    async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
+        result_type, result = self.calendar.run(context.get_user_input())
+
+        if result_type == "time":
+            text = f"The current time is {result}"
+        elif result_type == "date":
+            text = f"The date is {result}"
+        else:
+            text = "I can help with dates, days, and time."
+
+        await event_queue.enqueue_event(new_agent_text_message(text))
+
+    async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
+        raise NotImplementedError("cancel not supported")
 
 
-def handle_message(text):
-    result_type, result = get_calendar().run(text)
+def build_agent_card():
+    date_skill = AgentSkill(
+        id="current_date",
+        name="Date Lookup",
+        description="Returns a date for queries like today, tomorrow, next Friday, or 10 days from now.",
+        tags=["calendar", "date", "day"],
+        examples=[
+            "What's today's date?",
+            "What day is next Friday?",
+            "What is the date 10 days from now?",
+        ],
+    )
+    time_skill = AgentSkill(
+        id="current_time",
+        name="Current Time",
+        description="Returns the current local time.",
+        tags=["calendar", "time", "clock"],
+        examples=["What time is it?", "Current time please"],
+    )
+    return AgentCard(
+        name="Calendar Agent",
+        description="An A2A agent that returns dates or times using LLM-backed calendar understanding.",
+        url="http://127.0.0.1:8002/",
+        version="0.1.0",
+        default_input_modes=["text"],
+        default_output_modes=["text"],
+        capabilities=AgentCapabilities(streaming=False),
+        skills=[date_skill, time_skill],
+    )
 
-    if result_type == "time":
-        return f"The current time is {result}"
 
-    if result_type == "date":
-        return f"The date is {result}"
-
-    return "I can help with dates, days, and time."
-
-
-AGENT_CARD = {
-    "name": "Calendar Agent",
-    "description": "An A2A agent that returns dates or times using LLM-backed calendar understanding.",
-    "protocolVersion": "0.3.0",
-    "version": "0.1.0",
-    "url": "http://127.0.0.1:8002",
-    "capabilities": {
-        "streaming": False,
-        "pushNotifications": False,
-    },
-    "defaultInputModes": ["text"],
-    "defaultOutputModes": ["text"],
-    "skills": [
-        {
-            "id": "current_date",
-            "name": "Date Lookup",
-            "description": "Returns a date for queries like today, tomorrow, next Friday, or 10 days from now.",
-            "tags": ["calendar", "date", "day"],
-            "examples": [
-                "What's today's date?",
-                "What day is next Friday?",
-                "What is the date 10 days from now?",
-            ],
-        },
-        {
-            "id": "current_time",
-            "name": "Current Time",
-            "description": "Returns the current local time.",
-            "tags": ["calendar", "time", "clock"],
-            "examples": ["What time is it?", "Current time please"],
-        },
-    ],
-}
+def build_app():
+    request_handler = DefaultRequestHandler(
+        agent_executor=CalendarAgentExecutor(),
+        task_store=InMemoryTaskStore(),
+    )
+    server = A2AStarletteApplication(
+        agent_card=build_agent_card(),
+        http_handler=request_handler,
+    )
+    return server.build()
 
 
 def main():
-    run_a2a_server("127.0.0.1", 8002, AGENT_CARD, handle_message)
+    uvicorn.run(build_app(), host="127.0.0.1", port=8002)
 
 
 if __name__ == "__main__":

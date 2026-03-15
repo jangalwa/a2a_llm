@@ -1,12 +1,12 @@
 # A2A LLM Demo
 
-This project is a small local demonstration of an A2A-style architecture using three agents:
+This project is a small local demonstration of an A2A architecture using the official Python A2A SDK and three agents:
 
 - a calculator agent
 - a calendar agent
 - a root agent that routes requests to the right remote agent or answers directly
 
-The implementation is intentionally small. It uses local HTTP servers, agent cards for discovery, and JSON-RPC `message/send` for agent-to-agent communication.
+The implementation is intentionally small. It uses the official Python A2A SDK for local HTTP servers, agent cards for discovery, and `message/send` for agent-to-agent communication.
 
 ## What Architecture This Uses
 
@@ -24,7 +24,7 @@ In practical terms:
 - the specialized agents return their results
 - the root agent prints the final response
 
-This is a simple A2A-style setup rather than a full production A2A framework implementation. The point is to show the mechanics clearly:
+This demo uses the official Python A2A SDK rather than a custom transport layer. The point is to show the mechanics clearly:
 
 - agent discovery
 - capability advertisement
@@ -41,7 +41,6 @@ The repository uses a `src` layout:
 ├── README.md
 └── src/
     ├── llm.py
-    ├── a2a_common.py
     ├── a2a_calculator_server.py
     ├── a2a_calendar_server.py
     └── a2a_root_demo.py
@@ -50,19 +49,18 @@ The repository uses a `src` layout:
 Briefly:
 
 - `src/llm.py`: shared LLM wrapper
-- `src/a2a_common.py`: common A2A-style HTTP and JSON-RPC helpers
 - `src/a2a_calculator_server.py`: calculator agent server
 - `src/a2a_calendar_server.py`: calendar agent server
 - `src/a2a_root_demo.py`: root orchestrator and interactive demo loop
 
 ## How It Works
 
-Each remote agent exposes:
+Each remote agent exposes official SDK-backed A2A endpoints:
 
 - `GET /.well-known/agent-card.json`
 - `POST /` with JSON-RPC `message/send`
 
-The agent card advertises the agent’s identity and skills. The root agent uses those endpoints to discover and call the remote agents.
+The agent card advertises the agent’s identity and skills. The root agent uses the official A2A client to discover and call the remote agents.
 
 Current ports:
 
@@ -106,6 +104,15 @@ a2a-calculator
 a2a-calendar
 a2a-root-demo
 ```
+
+The server agents are implemented with the official A2A Python SDK primitives:
+
+- `AgentExecutor`
+- `DefaultRequestHandler`
+- `InMemoryTaskStore`
+- `A2AStarletteApplication`
+
+The root demo uses the official client side SDK through `ClientFactory.connect(...)`.
 
 ## Example Demo Queries
 
