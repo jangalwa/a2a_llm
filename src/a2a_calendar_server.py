@@ -1,3 +1,4 @@
+import logging
 import re
 from datetime import datetime, timedelta
 
@@ -10,6 +11,9 @@ from a2a.server.tasks import InMemoryTaskStore
 from a2a.types import AgentCapabilities, AgentCard, AgentSkill
 from a2a.utils.message import new_agent_text_message
 from llm import LLM
+
+
+logger = logging.getLogger("a2a.calendar")
 
 
 class Calendar:
@@ -57,6 +61,11 @@ class Calendar:
     def resolve_datetime(self, query):
         now = datetime.now().astimezone()
         fallback_type, fallback_value = self._fallback_resolution(query, now)
+        logger.info(
+            "Resolving calendar query: %s | fallback=%s",
+            query,
+            fallback_type or "none",
+        )
         messages = [
             {"role": "system", "content": self.system_prompt},
             {
@@ -68,6 +77,7 @@ class Calendar:
             },
         ]
         decision = self.llm.generate_response(messages).strip().upper()
+        logger.info("Calendar LLM decision: %s", decision)
 
         if decision == "TIME" or decision.startswith("TIME"):
             return "time", now
@@ -83,17 +93,26 @@ class Calendar:
             )
             return "date", value
 
+        logger.info(
+            "Calendar query fell back to deterministic handling: %s",
+            fallback_type or "unsupported",
+        )
         return fallback_type, fallback_value
 
     def run(self, query):
         result_type, value = self.resolve_datetime(query)
 
         if result_type == "time":
-            return result_type, self._format_time(value)
+            formatted = self._format_time(value)
+            logger.info("Resolved calendar response type=time value=%s", formatted)
+            return result_type, formatted
 
         if result_type == "date":
-            return result_type, self._format_date(value)
+            formatted = self._format_date(value)
+            logger.info("Resolved calendar response type=date value=%s", formatted)
+            return result_type, formatted
 
+        logger.warning("Calendar query could not be resolved: %s", query)
         return None, "Calendar error"
 
 
@@ -102,7 +121,9 @@ class CalendarAgentExecutor(AgentExecutor):
         self.calendar = Calendar()
 
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
-        result_type, result = self.calendar.run(context.get_user_input())
+        user_input = context.get_user_input()
+        logger.info("Received calendar request: %s", user_input)
+        result_type, result = self.calendar.run(user_input)
 
         if result_type == "time":
             text = f"The current time is {result}"
@@ -111,6 +132,7 @@ class CalendarAgentExecutor(AgentExecutor):
         else:
             text = "I can help with dates, days, and time."
 
+        logger.info("Sending calendar response: %s", text)
         await event_queue.enqueue_event(new_agent_text_message(text))
 
     async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
@@ -161,6 +183,11 @@ def build_app():
 
 
 def main():
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+    )
+    logger.info("Starting Calendar Agent on http://127.0.0.1:8002/")
     uvicorn.run(build_app(), host="127.0.0.1", port=8002)
 
 

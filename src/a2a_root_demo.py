@@ -1,5 +1,5 @@
 import asyncio
-import re
+import json
 
 from a2a.client import ClientConfig, ClientFactory, create_text_message_object
 from a2a.types import Message
@@ -38,52 +38,6 @@ def to_mapping(value):
     return value
 
 
-def is_math_query(text):
-    return bool(re.search(r"\d\s*[-+/*()]\s*\d", text))
-
-
-def is_calendar_query(text):
-    lowered = text.lower()
-    return any(
-        token in lowered
-        for token in [
-            "date",
-            "day",
-            "time",
-            "clock",
-            "today",
-            "tomorrow",
-            "yesterday",
-            "monday",
-            "tuesday",
-            "wednesday",
-            "thursday",
-            "friday",
-            "saturday",
-            "sunday",
-            "next ",
-            "last ",
-            "this ",
-            "from now",
-            "ago",
-        ]
-    )
-
-
-def route_query(text):
-    routes = []
-
-    if is_calendar_query(text):
-        routes.append(("calendar", text))
-
-    if is_math_query(text):
-        match = re.search(r"([0-9][0-9\s+\-*/().]*)", text)
-        if match:
-            routes.append(("calculator", match.group(1).strip()))
-
-    return routes
-
-
 class RootAgent:
     system_prompt = (
         "You are the root assistant in a small A2A demo.\n"
@@ -91,10 +45,62 @@ class RootAgent:
         "Be concise and helpful.\n"
         "Do not claim to have used tools unless tool results were already provided."
     )
+    router_prompt = (
+        "You are a routing controller for a small A2A demo.\n"
+        "Decide whether the user's request should be delegated to one or more remote agents.\n"
+        "Return JSON only. No markdown. No explanation.\n"
+        "The JSON schema is:\n"
+        '{\n'
+        '  "routes": [\n'
+        '    {"agent": "calculator" | "calendar", "input": "text to send to that agent"}\n'
+        "  ]\n"
+        "}\n"
+        "If no remote agent is needed, return {\"routes\": []}.\n"
+        "Delegate only when the request clearly matches an advertised skill.\n"
+        "For mixed questions, return multiple routes.\n"
+        "For calculator routes, send only the arithmetic expression.\n"
+        "For calendar routes, send the calendar-related portion of the request.\n"
+        "Never invent agent names."
+    )
 
-    def __init__(self):
+    def __init__(self, agent_cards):
         self.llm = LLM()
         self.history = []
+        self.agent_cards = agent_cards
+
+    def route_query(self, user_input):
+        agent_summaries = []
+        for agent_name, card in self.agent_cards.items():
+            skills = ", ".join(
+                f"{skill['id']}: {skill['description']}" for skill in card.get("skills", [])
+            )
+            agent_summaries.append(f"- {agent_name}: {card['name']} | skills: {skills}")
+
+        messages = [
+            {"role": "system", "content": self.router_prompt},
+            {
+                "role": "user",
+                "content": (
+                    "Available agents:\n"
+                    f"{chr(10).join(agent_summaries)}\n\n"
+                    f"User request: {user_input}"
+                ),
+            },
+        ]
+        response = self.llm.generate_response(messages)
+
+        try:
+            parsed = json.loads(response)
+        except json.JSONDecodeError:
+            return []
+
+        routes = []
+        for item in parsed.get("routes", []):
+            agent_name = item.get("agent")
+            route_input = item.get("input", "").strip()
+            if agent_name in self.agent_cards and route_input:
+                routes.append((agent_name, route_input))
+        return routes
 
     def answer_directly(self, user_input):
         messages = [
@@ -125,8 +131,13 @@ async def send_remote_message(client, text):
 
 async def run_demo():
     clients = await discover_agents()
-    root_agent = RootAgent()
-    print("Discovered agents:")
+    root_agent = RootAgent(
+        {
+            agent_name: entry["card"]
+            for agent_name, entry in clients.items()
+        }
+    )
+    print("\n\nDiscovered agents:")
     for entry in clients.values():
         card = entry["card"]
         print(f"- {card['name']}: {card['url']}")
@@ -143,7 +154,7 @@ async def run_demo():
             print("Demo exiting.")
             break
 
-        routes = route_query(user_input)
+        routes = root_agent.route_query(user_input)
         if not routes:
             answer = root_agent.answer_directly(user_input)
             print(f"Root: {answer}\n")

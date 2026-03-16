@@ -130,7 +130,7 @@ The last kind of query shows the root agent answering directly without delegatin
 
 ## Example Demo Output
 
-![Demo output](demo_output.png)
+![Demo output](demo_a2a_sdk.png)
 
 ## Inspect Agent Cards
 
@@ -168,6 +168,6 @@ curl -X POST http://127.0.0.1:8001 \
 ## Notes
 
 - The calculator and calendar agents are exposed as independent remote services.
-- The root agent uses simple routing rules plus an LLM fallback for general questions.
+- The root agent uses the shared LLM to choose whether to answer directly or delegate to one or more remote agents.
 - The calendar agent uses the shared LLM to interpret date/time questions, with a small deterministic fallback for common cases.
 - This demo is meant for experimentation and explanation, not for hardened production use.

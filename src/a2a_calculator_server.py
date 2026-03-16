@@ -1,3 +1,5 @@
+import logging
+
 import uvicorn
 from a2a.server.agent_execution import AgentExecutor, RequestContext
 from a2a.server.apps import A2AStarletteApplication
@@ -8,11 +10,18 @@ from a2a.types import AgentCapabilities, AgentCard, AgentSkill
 from a2a.utils.message import new_agent_text_message
 
 
+logger = logging.getLogger("a2a.calculator")
+
+
 class Calculator:
     def run(self, expression):
+        logger.info("Evaluating expression: %s", expression)
         try:
-            return str(eval(expression))
+            result = str(eval(expression))
+            logger.info("Evaluation result: %s", result)
+            return result
         except Exception:
+            logger.exception("Evaluation failed for expression: %s", expression)
             return "Calculation error"
 
 class CalculatorAgentExecutor(AgentExecutor):
@@ -21,8 +30,11 @@ class CalculatorAgentExecutor(AgentExecutor):
 
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
         expression = context.get_user_input().strip()
+        logger.info("Received calculator request: %s", expression)
         result = self.calculator.run(expression)
-        await event_queue.enqueue_event(new_agent_text_message(f"The answer is {result}"))
+        response_text = f"The answer is {result}"
+        logger.info("Sending calculator response: %s", response_text)
+        await event_queue.enqueue_event(new_agent_text_message(response_text))
 
     async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
         raise NotImplementedError("cancel not supported")
@@ -61,6 +73,11 @@ def build_app():
 
 
 def main():
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+    )
+    logger.info("Starting Calculator Agent on http://127.0.0.1:8001/")
     uvicorn.run(build_app(), host="127.0.0.1", port=8001)
 
 
